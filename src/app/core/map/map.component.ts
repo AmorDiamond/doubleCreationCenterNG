@@ -1,536 +1,479 @@
 import { Component, OnInit } from '@angular/core';
-import { Observable } from 'rxjs';
-import { Subscription } from 'rxjs';
 import { Store, select } from '@ngrx/store';
-import { Amap } from '../../core/amap-ngrx/amap.model';
-import { ViewEncapsulation } from '@angular/core';
+import { MapStore } from "../map-store/map.model";
 import { Router } from '@angular/router';
+import { ADDPARKMARK, ADDENTERPRISEMARK, CLEARMARK } from "../map-store/map.actions";
+import { MapService } from "./map.service";
+import { HomeService } from "../../pages/home/home.service";
 
 declare var AMap: any;
-declare var AMapUI: any;
-// declare var $: any;
-
 @Component({
-  encapsulation: ViewEncapsulation.None,
   selector: 'app-map',
-  template: `<div id='t-amap' class='t-amap'></div>`,
-  styleUrls: ['map.component.css']
+  templateUrl: './map.component.html',
+  styleUrls: ['./map.component.css']
 })
 export class MapComponent implements OnInit {
 
-  tagState$: Observable<Amap>;
-  constructor(private store: Store<Amap>,
+  constructor(
+    private mapStore: Store<MapStore>,
     private router: Router,
+    private mapService: MapService,
+    private homeService: HomeService
   ) {
-    this.tagState$ = this.store.pipe(select('amap'));
+    this.mapStore$ = mapStore.pipe(select('map'));
   }
-
-  AMAPOBJ: any;
-  amap: any;
-  action: any;
-  dataPolygonTopCateLands: any = {};
-  dataPolygonEcoCateLands: any = {};
-  topRank: any;
-  defaultBorderColor = "#8ee3a2";
-  defaultLandColor = "transparent";
-  dataPolygonAlls: any;
-  nowPolygonType: any;
-  pointSimplifierIns: any;
-  companyAddressMarkerList = [];
-
-
+  Map: any;
+  areaMarks = [];
+  mapStore$: any;
+  areaParkName: any;
+  rangePositions = {
+    westPoints: [],
+    southPoints: [],
+    eastPoints: [],
+    biologicalCityPoints: [],
+  };
+  rangeArry = {
+    westRange: null,
+    southRange: null,
+    eastRange: null,
+    biologicalCityRange: null,
+  };
+  rangePolygonConfig = {
+    strokeColor: '#00c3ff',
+    strokeWeight: '',
+    fillColor: '#06a0e7',
+    fillOpacity: 0.12
+  };
+  showLoading = false;
+  parkHeatmap: any = {};
+  parkHeatmapData: any;
+  parkEnterpriseData: any = {
+    '高新西区': 0,
+    '高新南区': 0,
+    '高新东区': 0,
+    '天府国际生物城': 0,
+  };
+  parkMarkClickName = '';
+  mainPointsMark: any;
   ngOnInit() {
-    // this.tagState$.subscribe((state: Amap) => {
-    //   console.log(this.AMAPOBJ);
-    // });
-    setTimeout(() => {
-      const map = new AMap.Map('t-amap', {
-        // features: ['bg', 'road', 'building']
+    const creatMap = this.creatMap();
+    // 保证地图加载完并且绘制完parkRange
+    creatMap.then((res) => {
+      // 监听home组件获取到heatmap所需数据后进行绘制
+      this.homeService.getHeatmapData().subscribe(res => {
+        this.parkHeatmapData = res;
+        this.parkHeatmapData && this.createParkHeatmap();
       });
-      this.AMAPOBJ = map;
-      this.AMAPOBJ.on('click', e => {
-        const lnglatXY = [e.lnglat.getLng(), e.lnglat.getLat()];
-        const geocoder = new AMap.Geocoder({
-          radius: 1000,
-          extensions: 'all'
-        });
-        geocoder.getAddress(lnglatXY, function(status, result) {
-          console.log(lnglatXY, status, result)
-          if (status === 'complete' && result.info === 'OK') {
-            const address = result.regeocode.formattedAddress; // 返回地址描述
-            console.log(address);
+      this.mapStore$.subscribe(res => {
+        const data = res.data;
+        if (data.type == ADDENTERPRISEMARK) {
+          // this.parkHeatmap && this.parkHeatmap.hide();
+          for (const i in this.parkHeatmap) {
+            this.parkHeatmap[i] && this.parkHeatmap[i].hide();
           }
-        });
-      });
-      /*let district;
-      district = new AMap.DistrictSearch({
-        level: 'district',
-        extensions: 'all'
-      });
-      /!*先搜索成都市的所有行政区*!/
-      district.search('成都市', (status, result) => {
-        if (status === 'complete') {
-          const areaList = result.districtList[0].districtList;
-          areaList.forEach(item => {
-            if (item.name) {
-              /!*再通过行政区的adcode区搜索范围*!/
-              district.search(item.adcode, (areaStatus, areaResult) => {
-                if (areaStatus === 'complete') {
-                  const areaData = areaResult.districtList[0];
-                  if (areaData.name) {
-                    this.getAreaData(areaData);
-                  }
-                }
-              });
-            }
-          });
-        }
-      });*/
-      this.action = {
-        'openInfo': (data) => {
-          const infoWindow = new AMap.InfoWindow({
-            content: data.contentArray.join('<br/>')  // 使用默认信息窗体框样式，显示信息内容
-          });
-          infoWindow.open(map, map.getCenter());
-        },
-        'ADD_MARKER': (data) => {
-          data.forEach((item, index) => {
-            const marker = new AMap.Marker({
-              position: item.center.split(','),
-              title: item.name,
-              map: map,
-              content: `<div class="mapMarker"><span>${item.name}</span></div>`
-            });
-            marker.on('click', () => {
-              console.log(marker.getTitle());
-              // console.log(marker.F.title);
-              // this.microcosmicService.changeData(marker.getTitle());
-            });
-          });
-          map.setFitView();
-          // map.panBy(-580, 10);
-        },
-        'ADD_MARKER_MID': (data) => {
-          /*判断是否存在海量点layer，有就清空显示*/
-          if (this.pointSimplifierIns) {
-            this.pointSimplifierIns.setData();
+          this.createMainPointsMark(); // 绘制主要兴趣点
+          const imgName = data.img;
+          const router = data.router;
+          const options = data.options;
+          if (!data.detail) {
+            this.creatEnterpriseMark(imgName, options);
+          } else {
+            this.creatEnterpriseDetailMark(imgName, options)
           }
-          data.forEach((item, index) => {
-            const marker = new AMap.Marker({
-              position: item.center.split(','),
-              title: item.name,
-              map: map,
-              content: `<div class="mapMarker"><span>${item.name}</span></div>`
+        } else if (data.type == CLEARMARK) {
+          this.clearMark();
+        } else if (data.type == ADDPARKMARK) {
+          this.areaParkName = data.options;
+          // this.creatParkRange();
+          this.creatParkMark();
+
+          if (this.mainPointsMark) { // home页面隐藏自定义的兴趣点
+            this.mainPointsMark.forEach(item => {
+              item.hide();
             });
-            marker.on('click', (e) => {
-              console.log(marker.F.title);
-              console.log(e);
-              marker.setContent(`<div class="mapMarker active"><span>${item.name}</span></div>`);
-              // this.intermediateService.changeParkName(marker.F.title);
-              /*点击中观园区进入园区数据看板*/
-              this.router.navigate(['/int/industryBoard/parkMenu/registMoney']);
-            });
-          });
-          map.setFitView();
-          // map.setZoom(12);
-          map.panBy(-580, 10);
-        },
-        'ADD_POLYGON': (datas) => {
-          map.clearMap();
-          const data = datas.type ? datas.type : datas;
-          const time = datas.time ? datas.time : '';
-          const getNew = datas.flag ? datas.flag : false;
-        },
-        'ADD_SINGLE_POLYGON': (datas) => {
-          map.clearMap();
-          const data = datas.type;
-          const industryStatus = datas.industry;
-        },
-        'ADD_INDUSTRY_MAP_POLYGON': (data) => {
-          const type = data.type;
-          const options = data.data ? data.data : '';
-          const updated = data.updated ? data.updated : false;
-          if (this.nowPolygonType == type && !updated) {
-            map.setFitView();
-            map.panBy(-580, 10);
             return;
           }
-          this.nowPolygonType = type;
-          map.clearMap();
-          console.log('map', this.pointSimplifierIns);
-          /*判断是否存在海量点layer，有就清空显示*/
-          if (this.pointSimplifierIns) {
-            this.pointSimplifierIns.setData();
-          }
-          map.setFitView();
-          map.panBy(-580, 10);
-        },
-        'ADD_BUILD_MARKER': (data) => {
-          map.off('zoomend', function (e) {
-            console.log(e);
-          });
-        },
-        'ADD_COMPANY_ADDRESS': (datas) => {
-          console.log('ADD_COMPANY_ADDRESS', datas);
-          map.remove(this.companyAddressMarkerList)
-          this.creatCompanyAddress(datas);
-        },
-        'CLEAR_MARKER': (data) => {
-          map.clearMap();
         }
-      };
-      this.tagState$.subscribe((state: Amap) => {
-        if (state.action) {
-          this.action[state.action](state.data);
-        }
-      });
-      map.plugin('AMap.Geolocation', () => {
-        const geolocation = new AMap.Geolocation({
-          enableHighAccuracy: true, // 是否使用高精度定位，默认:true
-          timeout: 10000,          // 超过10秒后停止定位，默认：无穷大
-          maximumAge: 0,           // 定位结果缓存0毫秒，默认：0
-          convert: true,           // 自动偏移坐标，偏移后的坐标为高德坐标，默认：true
-          viewMode: '3D',
-          zoom: '12',
-          showButton: false,        // 显示定位按钮，默认：true
-          buttonPosition: 'LB',    // 定位按钮停靠位置，默认：'LB'，左下角
-          buttonOffset: new AMap.Pixel(10, 20), // 定位按钮与设置的停靠位置的偏移量，默认：Pixel(10, 20)
-          showMarker: true,        // 定位成功后在定位到的位置显示点标记，默认：true
-          showCircle: true,        // 定位成功后用圆圈表示定位精度范围，默认：true
-          panToLocation: true,     // 定位成功后将定位到的位置作为地图中心点，默认：true
-          zoomToAccuracy: true     // 定位成功后调整地图视野范围使定位位置及精度范围视野内可见，默认：false
-        });
-        map.addControl(geolocation);
-      });
-      /*AMap.event.addListener(map, 'zoomend', function(){
-        const zoom = map.getZoom();
-        const markers = map.getAllOverlays('marker');
-        if (zoom <= 12) {
-            markers.forEach(function(item, index) {
-                item.show();
-            });
-        } else {
-            markers.forEach(function(item, index) {
-                item.hide();
-            });
-        }
-        // map.getAllOverlays('marker')[0].hide()
-    });*/
-    }, 200);
-
-  }
-  formatEcoTopLandsData(options) {
-    const pointsArr = [];
-    const allLandsDataPointsArr = [];
-    for(let n=0; n<options.length-1; n++){
-      const last = options[n].last;
-      const top = options[n].top;
-      for (let i=0;i<last.length;i++){
-        // pointsArr.push(res[i].points);
-        const point_x_y = [];
-        const pointItem: any = {id:"",position:"",inefficient:"",landArea:"",landUsrNature:""};
-        for(let j=0;j<last[i].points.length;j++){
-          point_x_y.push([last[i].points[j].point_80_x,last[i].points[j].point_80_y]);
-        }
-        pointItem.type = "last";
-        pointItem.landType = last[i].enterpriseType;
-        pointItem.id = last[i].id;
-        pointItem.unifiedLandMark = last[i].unifiedLandMark;
-        pointItem.rightHolder = last[i].rightHolder;
-        pointItem.landIsLocated = last[i].landIsLocated;
-        pointItem.inefficient = last[i].inefficient;
-        pointItem.actualUsers = last[i].actualUsers;
-        pointItem.pricepermeter = last[i].pricepermeter;
-        pointItem.landCardNumber = last[i].landCardNumber;
-        /*按性质分类*/
-        pointItem.generalType = last[i].generalType;
-        /*实测面积*/
-        pointItem.landArea = last[i].landArea;
-        /*使用全面积*/
-        pointItem.usageArea = last[i].usageArea;
-        pointItem.landUsrNature = last[i].landUsrNature;
-        pointItem.position = point_x_y;
-        pointsArr.push(pointItem);
-      }
-
-      for (let l=0;l<top.length;l++){
-        // pointsArr.push(res[i].points);
-        var point_x_y = [];
-        var pointItem: any = {id:"",position:"",inefficient:"",landArea:"",landUsrNature:""};
-        for(var m=0;m<top[l].points.length;m++){
-          point_x_y.push([top[l].points[m].point_80_x,top[l].points[m].point_80_y]);
-        }
-        pointItem.id = top[l].id;
-        pointItem.type = "top";
-        pointItem.landType = top[l].enterpriseType;
-        pointItem.unifiedLandMark = top[l].unifiedLandMark;
-        pointItem.rightHolder = top[l].rightHolder;
-        pointItem.landIsLocated = top[l].landIsLocated;
-        pointItem.inefficient = top[l].inefficient;
-        pointItem.actualUsers = top[l].actualUsers;
-        pointItem.pricepermeter = top[l].pricepermeter;
-        pointItem.landCardNumber = top[l].landCardNumber;
-        /*按性质分类*/
-        pointItem.generalType = top[l].generalType;
-        /*实测面积*/
-        pointItem.landArea = top[l].landArea;
-        /*使用全面积*/
-        pointItem.usageArea = top[l].usageArea;
-        pointItem.landUsrNature = top[l].landUsrNature;
-        pointItem.position = point_x_y;
-        pointsArr.push(pointItem);
-      }
-    }
-
-    const allLandsData = options[options.length - 1];
-    for(let i=0;i<allLandsData.length;i++){
-      // pointsArr.push(res[i].points);
-      const point_x_y = [];
-      const pointItem: any = {id:"",position:"",inefficient:"",landArea:"",landUsrNature:""};
-      for(var j=0;j<allLandsData[i].points.length;j++){
-        point_x_y.push([allLandsData[i].points[j].point_80_x,allLandsData[i].points[j].point_80_y]);
-      }
-      pointItem.id = allLandsData[i].id;
-      pointItem.unifiedLandMark = allLandsData[i].unifiedLandMark;
-      pointItem.rightHolder = allLandsData[i].rightHolder;
-      pointItem.actualUsers = allLandsData[i].actualUsers;
-      pointItem.landIsLocated = allLandsData[i].landIsLocated;
-      pointItem.inefficient = allLandsData[i].inefficient;
-      pointItem.isSingle = allLandsData[i].isSingle;
-      pointItem.landCardNumber = allLandsData[i].landCardNumber;
-      /*按性质分类*/
-      pointItem.generalType = allLandsData[i].generalType;
-      /*实测面积*/
-      pointItem.landArea = allLandsData[i].landArea;
-      /*使用全面积*/
-      pointItem.usageArea = allLandsData[i].usageArea;
-      pointItem.landUsrNature = allLandsData[i].landUsrNature;
-      pointItem.position = point_x_y;
-      allLandsDataPointsArr.push(pointItem);
-    }
-    this.dataPolygonAlls = allLandsDataPointsArr;
-    const allOptions = allLandsDataPointsArr;
-    for (let i = 0; i < pointsArr.length; i++) {
-      for (let j = 0; j < allOptions.length; j++) {
-        if (pointsArr[i].unifiedLandMark == allOptions[j].unifiedLandMark) {
-          allOptions.splice(j, 1);
-          break;
-        }
-      }
-    }
-    const dataPolygonTopLands = allOptions.concat(pointsArr);
-    return dataPolygonTopLands;
-  }
-  formatEcoOutputLandsData(options) {
-    const landsData = options;
-    const pointsArr = [];
-    const allLandsDataPointsArr = [];
-    for (let n=0; n<landsData.length - 1; n++) {
-      const firstLv = landsData[n].firstGradient;
-      const secondLv = landsData[n].secondGradient;
-      const thirdLv = landsData[n].thirdGradient;
-      // console.log(res)
-      for(let i=0;i<firstLv.length;i++){
-        // pointsArr.push(res[i].points);
-        var point_x_y = [];
-        var pointItem: any = {id:"",position:"",enterpriseType:"",landArea:"",landUsrNature:""};
-        for(var j=0;j<firstLv[i].points.length;j++){
-          point_x_y.push([firstLv[i].points[j].point_80_x,firstLv[i].points[j].point_80_y]);
-        }
-        pointItem.id = firstLv[i].id;
-        pointItem.unifiedLandMark = firstLv[i].unifiedLandMark;
-        pointItem.rightHolder = firstLv[i].rightHolder;
-        pointItem.landIsLocated = firstLv[i].landIsLocated;
-        pointItem.enterpriseType = firstLv[i].enterpriseType;
-        pointItem.ecoLv = 1;
-        pointItem.actualUsers = firstLv[i].actualUsers;
-        pointItem.pricepermeter = firstLv[i].pricepermeter;
-        pointItem.landCardNumber = firstLv[i].landCardNumber;
-        /*按性质分类*/
-        pointItem.generalType = firstLv[i].generalType;
-        /*实测面积*/
-        pointItem.landArea = firstLv[i].landArea;
-        /*使用全面积*/
-        pointItem.usageArea = firstLv[i].usageArea;
-        pointItem.landUsrNature = firstLv[i].landUsrNature;
-        pointItem.position = point_x_y;
-        pointsArr.push(pointItem);
-      }
-      for(var i=0;i<secondLv.length;i++){
-        // pointsArr.push(res[i].points);
-        var point_x_y = [];
-        var pointItem: any = {id:"",position:"",enterpriseType:"",landArea:"",landUsrNature:""};
-        for(var j=0;j<secondLv[i].points.length;j++){
-          point_x_y.push([secondLv[i].points[j].point_80_x,secondLv[i].points[j].point_80_y]);
-        }
-        pointItem.id = secondLv[i].id;
-        pointItem.unifiedLandMark = secondLv[i].unifiedLandMark;
-        pointItem.rightHolder = secondLv[i].rightHolder;
-        pointItem.landIsLocated = secondLv[i].landIsLocated;
-        pointItem.enterpriseType = secondLv[i].enterpriseType;
-        pointItem.ecoLv = 2;
-        pointItem.actualUsers = secondLv[i].actualUsers;
-        pointItem.pricepermeter = secondLv[i].pricepermeter;
-        pointItem.landCardNumber = secondLv[i].landCardNumber;
-        /*按性质分类*/
-        pointItem.generalType = secondLv[i].generalType;
-        /*实测面积*/
-        pointItem.landArea = secondLv[i].landArea;
-        /*使用全面积*/
-        pointItem.usageArea = secondLv[i].usageArea;
-        pointItem.landUsrNature = secondLv[i].landUsrNature;
-        pointItem.position = point_x_y;
-        pointsArr.push(pointItem);
-      }
-      for(var i=0;i<thirdLv.length;i++){
-        // pointsArr.push(res[i].points);
-        var point_x_y = [];
-        var pointItem: any = {id:"",position:"",enterpriseType:"",landArea:"",landUsrNature:""};
-        for(var j=0;j<thirdLv[i].points.length;j++){
-          point_x_y.push([thirdLv[i].points[j].point_80_x,thirdLv[i].points[j].point_80_y]);
-        }
-        pointItem.id = thirdLv[i].id;
-        pointItem.unifiedLandMark = thirdLv[i].unifiedLandMark;
-        pointItem.rightHolder = thirdLv[i].rightHolder;
-        pointItem.landIsLocated = thirdLv[i].landIsLocated;
-        pointItem.enterpriseType = thirdLv[i].enterpriseType;
-        pointItem.ecoLv = 3;
-        pointItem.actualUsers = thirdLv[i].actualUsers;
-        pointItem.pricepermeter = thirdLv[i].pricepermeter;
-        pointItem.landCardNumber = thirdLv[i].landCardNumber;
-        /*按性质分类*/
-        pointItem.generalType = thirdLv[i].generalType;
-        /*实测面积*/
-        pointItem.landArea = thirdLv[i].landArea;
-        /*使用全面积*/
-        pointItem.usageArea = thirdLv[i].usageArea;
-        pointItem.landUsrNature = thirdLv[i].landUsrNature;
-        pointItem.position = point_x_y;
-        pointsArr.push(pointItem);
-      }
-    }
-
-    const allLandsData = landsData[landsData.length - 1];
-    for(let i=0;i<allLandsData.length;i++){
-      // pointsArr.push(res[i].points);
-      const point_x_y = [];
-      const pointItem: any = {id:"",position:"",inefficient:"",landArea:"",landUsrNature:""};
-      for(var j=0;j<allLandsData[i].points.length;j++){
-        point_x_y.push([allLandsData[i].points[j].point_80_x,allLandsData[i].points[j].point_80_y]);
-      }
-      pointItem.id = allLandsData[i].id;
-      pointItem.unifiedLandMark = allLandsData[i].unifiedLandMark;
-      pointItem.rightHolder = allLandsData[i].rightHolder;
-      pointItem.actualUsers = allLandsData[i].actualUsers;
-      pointItem.landIsLocated = allLandsData[i].landIsLocated;
-      pointItem.inefficient = allLandsData[i].inefficient;
-      pointItem.isSingle = allLandsData[i].isSingle;
-      pointItem.landCardNumber = allLandsData[i].landCardNumber;
-      /*按性质分类*/
-      pointItem.generalType = allLandsData[i].generalType;
-      /*实测面积*/
-      pointItem.landArea = allLandsData[i].landArea;
-      /*使用全面积*/
-      pointItem.usageArea = allLandsData[i].usageArea;
-      pointItem.landUsrNature = allLandsData[i].landUsrNature;
-      pointItem.position = point_x_y;
-      allLandsDataPointsArr.push(pointItem);
-    }
-    this.dataPolygonAlls = allLandsDataPointsArr;
-    const allOptions = allLandsDataPointsArr;
-
-    for (let i = 0; i < pointsArr.length; i++) {
-      for (let j = 0; j < allOptions.length; j++) {
-        if (pointsArr[i].unifiedLandMark == allOptions[j].unifiedLandMark) {
-          allOptions.splice(j, 1);
-          break;
-        }
-      }
-    }
-    const dataPolygonEcoLands = allOptions.concat(pointsArr);
-    return dataPolygonEcoLands;
-  }
-  /*绘制行政区*/
-  getAreaData(data, level?) {
-    const polygons = [];
-    const bounds = data.boundaries;
-    const map = this.AMAPOBJ;
-    if (bounds) {
-      const areaText = new AMap.Text({
-        text: data.name,
-        map: map,
-        zIndex: 1,
-        position: data.center,
-        style: {
-          'background': 'none',
-          'border': 'none',
-        }
-      });
-      for (let i = 0, l = bounds.length; i < l; i++) {
-        const polygon = new AMap.Polygon({
-          map: map,
-          strokeWeight: 1,
-          strokeColor: '#CC66CC',
-          fillColor: '#CCF3FF',
-          fillOpacity: 0.5,
-          path: bounds[i]
-        });
-        polygons.push(polygon);
-      }
-      // map.setFitView(); // 地图自适应
-    }
-  }
-  /*绘制企业位置*/
-  creatCompanyAddress(options) {
-    const companyList = [];
-    const map = this.AMAPOBJ;
-    console.log(options)
-    options.forEach(item => {
-      const position = item.address.split(',');
-      const name = item.company;
-      const marker = new AMap.Marker({
-        position: position,
-        // title: name,
-        map: map,
-        zIndex: 999,
-        icon: new AMap.Icon({
-          size: new AMap.Size(40, 50),  // 图标大小
-          image: '../assets/images/build_position_icon.png',
-          // imageOffset: new AMap.Pixel(0, -60),
-          imageSize: new AMap.Size(40, 50)
-        }),
-        extData: {
-          name: item.company
-        }
-      });
-      this.companyAddressMarkerList.push(marker);
-      marker.on('mouseover', (e) => {
-        console.log('over', e)
-        const markerObj = e.target;
-        let name = markerObj.getExtData().name;
-        let position = markerObj.getPosition();
-        console.log('over', name)
-        const infoWindow = new AMap.InfoWindow({
-          autoMove: true,
-          content: name,
-          position: position,
-          offset: new AMap.Pixel(-5 , -20),
-          showShadow: true
-        });
-        infoWindow.open(map);
-      });
-      marker.on('mouseout', () => {
-        map.clearInfoWindow();
-      });
-      marker.on('click', (e) => {
-        map.clearInfoWindow();
-        const markerObj = e.target;
-        let name = markerObj.getExtData().name;
-        this.router.navigate(['/mic/companyDetail/basic/company-profile'], { queryParams: { name: name } });
       });
     });
+  }
+  creatMap () {
+    return new Promise((resolve, reject) => {
+      this.Map = new AMap.Map('map-container', {
+        mapStyle: 'amap://styles/31de9aab619163969cccb46cda057329',
+        zooms: [10, 18],
+        features: ['road', 'building']
+      });
+      const bounds = new AMap.Bounds([103.127091,30.139474], [105.004379,31.176667]);
+      this.Map.setLimitBounds(bounds);
+      this.Map.on("complete", () => {
+        if (this.rangeArry.westRange) {
+          return;
+        }
+        this.rangePositions = this.mapService.getRangePositions();
+        this.parkEnterpriseData = this.mapService.getParkEnterprise();
+        this.creatParkRange();
+        resolve()
+      });
+    });
+  }
+  creatParkRange () {
+    console.log('creatParkRange')
+    const map = this.Map;
+    /*if (this.rangeArry.westRange) { // 如果parkRange已绘制则直接处理parkMark，可以实现通过range的center绘制mark
+      this.creatParkMark();
+      return;
+    }*/
+    const westRange = new AMap.Polygon({
+      map: map,
+      path: this.rangePositions.westPoints,
+      strokeColor: this.rangePolygonConfig.strokeColor,
+      fillColor: this.rangePolygonConfig.fillColor,
+      fillOpacity: this.rangePolygonConfig.fillOpacity,
+    });
+    this.rangeArry.westRange = westRange;
+    const southRange = new AMap.Polygon({
+      map: map,
+      path: this.rangePositions.southPoints,
+      strokeColor: this.rangePolygonConfig.strokeColor,
+      fillColor: this.rangePolygonConfig.fillColor,
+      fillOpacity: this.rangePolygonConfig.fillOpacity,
+    });
+    this.rangeArry.southRange = southRange;
+    const eastRange = new AMap.Polygon({
+      map: map,
+      path: this.rangePositions.eastPoints,
+      strokeColor: this.rangePolygonConfig.strokeColor,
+      fillColor: this.rangePolygonConfig.fillColor,
+      fillOpacity: this.rangePolygonConfig.fillOpacity,
+    });
+    this.rangeArry.eastRange = eastRange;
+    const biologicalCityRange = new AMap.Polygon({
+      map: map,
+      path: this.rangePositions.biologicalCityPoints,
+      strokeColor: this.rangePolygonConfig.strokeColor,
+      fillColor: this.rangePolygonConfig.fillColor,
+      fillOpacity: this.rangePolygonConfig.fillOpacity,
+    });
+    this.rangeArry.biologicalCityRange = biologicalCityRange;
+    // this.creatParkMark();
+    // this.createParkHeatmap();
+    /*new AMap.ImageLayer({
+      map: map,
+      url: 'assets/images/xiqu_area_range.png',
+      bounds: new AMap.Bounds([103.745758,30.736217], [103.961365,30.913112])
+    });
+    new AMap.ImageLayer({
+      map: map,
+      url: 'assets/images/nanqu_area_range.png',
+      bounds: new AMap.Bounds([103.964111,30.498669], [104.207184,30.629924])
+    });
+    new AMap.ImageLayer({
+      map: map,
+      url: 'assets/images/guoji_area_range.png',
+      bounds: new AMap.Bounds([103.835022,30.285445], [104.052002,30.465531])
+    });
+    new AMap.ImageLayer({
+      map: map,
+      url: 'assets/images/dongqu_area_range.png',
+      bounds: new AMap.Bounds([104.154999,29.917138], [104.610932,30.420541])
+    });*/
+  }
+  createParkHeatmap () {
+    const heatmapData = this.parkHeatmapData;
+    const map = this.Map;
+    map.plugin(["AMap.Heatmap"], () => {
+      //初始化heatmap对象
+      for (const item in heatmapData) { // 遍历生成四个园区的热力图
+        this.parkHeatmap[item] = new AMap.Heatmap(map, {
+          radius: 25, //给定半径
+          opacity: [0, 1],
+          gradient: {
+            0.2:'#e9d48b',
+            0.4:'#ffe700',
+            0.8:'#ffc500',
+            0.95:'#ef7530',
+            1.0:'#ec4141'
+          }
+        });
+        let max = null;
+        // 处理西区和南区热力图最大值
+        switch (item) {
+          case 'west':
+            max = 200;
+          break;
+          case 'south':
+            max = 2000;
+          break;
+        }
+        //设置数据集
+        this.parkHeatmap[item].setDataSet({
+          data: heatmapData[item],
+          max: max
+        });
+      }
+      /*this.parkHeatmap = new AMap.Heatmap(map, {
+        radius: 10, //给定半径
+        opacity: [0, 1],
+        gradient: {
+          0.2:'#e9d48b',
+          0.4:'#ffe700',
+          0.8:'#ffc500',
+          0.95:'#ef7530',
+          1.0:'#ec4141'
+        }
+      });
+      //设置数据集
+      this.parkHeatmap.setDataSet({
+        data: heatmapData,
+        max: 1000
+      });*/
+    });
+  }
+  creatParkMark() {
+    console.log('creatParkMark')
+    // this.parkHeatmap && this.parkHeatmap.show();
+    for (const i in this.parkHeatmap) {
+      this.parkHeatmap[i] && this.parkHeatmap[i].show();
+    }
+    const map = this.Map;
+    // this.Map.setZoom(10);
+    map.remove(this.areaMarks);
+    // 以 icon URL 的形式创建一个途经点
+    const westCenter = this.rangeArry.westRange.getBounds().getCenter();
+    const xiquMarker = new AMap.Marker({
+      map: map,
+      position: westCenter,
+      // icon: 'assets/images/xiqu_mark_point_text.png',
+      offset: new AMap.Pixel(-250, -30),
+      content: `<div class="park-mark-box">
+                  <div class="park-mark-con">
+                    <div class="title">高新西区</div>
+                    <p class="park-info">企业总量:<span class="number">${this.parkEnterpriseData['高新西区']}</span>家</p>
+                  </div>
+                </div>`,
+      extData: {
+        name: '高新西区',
+        position: westCenter
+      }
+    });
+    const southCenter = this.rangeArry.southRange.getBounds().getCenter();
+    const nanquMarker = new AMap.Marker({
+      map: map,
+      position: southCenter,
+      // icon: 'assets/images/nanqu_mark_point_text.png',
+      offset: new AMap.Pixel(70, -40),
+      content: `<div class="park-mark-box left-arrow">
+                  <div class="park-mark-con">
+                    <div class="title">高新南区</div>
+                    <p class="park-info">企业总量:<span class="number">${this.parkEnterpriseData['高新南区']}</span>家</p>
+                  </div>
+                </div>`,
+      extData: {
+        name: '高新南区',
+        position: southCenter
+      }
+    });
+    const biologicalCityCenter = this.rangeArry.biologicalCityRange.getBounds().getCenter();
+    const guojiMarker = new AMap.Marker({
+      map: map,
+      position: biologicalCityCenter,
+      // icon: 'assets/images/guoji_mark_point_text.png',
+      offset: new AMap.Pixel(-340, -40),
+      content: `<div class="park-mark-box">
+                  <div class="park-mark-con">
+                    <div class="title">天府国际生物城</div>
+                    <p class="park-info">企业总量:<span class="number">${this.parkEnterpriseData['天府国际生物城']}</span>家</p>
+                  </div>
+                </div>`,
+      extData: {
+        name: '天府国际生物城',
+        position: biologicalCityCenter
+      }
+    });
+    const eastCenter = this.rangeArry.eastRange.getBounds().getCenter();
+    const dongquMarker = new AMap.Marker({
+      map: map,
+      position: eastCenter,
+      // icon: 'assets/images/dongqu_mark_point_text.png',
+      offset: new AMap.Pixel(-330, -20),
+      content: `<div class="park-mark-box">
+                  <div class="park-mark-con">
+                    <div class="title">高新东区</div>
+                    <p class="park-info">企业总量:<span class="number">${this.parkEnterpriseData['高新东区']}</span>家</p>
+                  </div>
+                </div>`,
+      extData: {
+        name: '高新东区',
+        position: eastCenter
+      }
+    });
+    this.areaMarks = [xiquMarker, nanquMarker, guojiMarker, dongquMarker];
+    if (this.areaParkName) { // 判断是否通过点击parkMark进入的home页面
+      this.areaMarks.forEach(item => {
+        if (this.areaParkName === item.getExtData().name) {
+          const parkCenter = item.getExtData().position;
+          // this.Map.setCenter(parkCenter);
+          this.Map.panTo(parkCenter);
+          this.Map.setZoom(12);
+        }
+      });
+    } else {
+      this.Map.setFitView(this.areaMarks);
+    }
+    this.areaMarks.forEach(item => {
 
-    map.setFitView(); // 地图自适应
-    map.panBy(-300, 40);
+      item.on('click', (res) => {
+        console.log(res.target.getExtData())
+        const areaName = res.target.getExtData().name;
+        this.areaParkName = areaName;
+        this.router.navigate(['home'], {
+          queryParams: {
+            park: this.areaParkName
+          }
+        })
+      })
+    })
+  }
+  creatEnterpriseMark (markerColor, options) {
+    console.log('creatEnterpriseMark')
+    this.Map.remove(this.areaMarks);
+    // this.Map.setZoom(11);
+    // this.Map.setCenter([104.065837,30.657349]);
+    // const icon = imgName ? imgName : 'enterprise_mark_point.png';
+    const icon = markerColor ? markerColor : '#4fd0f7';
+    options.forEach((item) => {
+      if (!item.position) {
+        return;
+      }
+      // 以 icon URL 的形式创建一个途经点
+      const enterpriseMarker = new AMap.CircleMarker({
+        map: this.Map,
+        center: item.position,
+        radius: 8,
+        strokeColor: 'white',
+        strokeWeight: 2,
+        strokeOpacity: 0.5,
+        fillColor: icon,
+        fillOpacity: 1,
+        bubble: true,
+        cursor: 'pointer',
+        clickable: true,
+        extData: {
+          id: item.id,
+          name: item.name,
+          position: item.position
+        }
+      });
+      /*const enterpriseMarker = new AMap.Marker({
+        map: this.Map,
+        position: item.position,
+        icon: 'assets/images/' + icon,
+        offset: new AMap.Pixel(-17, -39),
+        extData: {
+          id: item.id,
+          name: item.name,
+          position: item.position
+        }
+      });*/
+      enterpriseMarker.on('click', (item) => {
+        const event = item.target;
+        const name = event.getExtData().name;
+        const id = event.getExtData().id;
+        const position = event.getExtData().position;
+        const enterpriseData = [{id: id,name: name, position: position}];
+        this.creatEnterpriseMark(icon, enterpriseData);
+        const router = this.router.url.split('/')[1];
+        this.router.navigate([router + '/detail', id])
+      });
+      this.areaMarks.push(enterpriseMarker);
+    })
+  }
+  creatEnterpriseDetailMark (markerColor, options) {
+    this.Map.remove(this.areaMarks);
+    // const icon = imgName ? imgName : 'enterprise_mark_point.png';
+    const icon = markerColor ? markerColor : '#4fd0f7';
+    if (!options.position) {
+      return;
+    }
+    this.Map.setZoom(11);
+    this.Map.panTo(options.position);
+
+    const enterpriseMarker = new AMap.CircleMarker({
+      map: this.Map,
+      center: options.position,
+      radius: 8,
+      strokeColor: 'white',
+      strokeWeight: 2,
+      strokeOpacity: 0.5,
+      fillColor: icon,
+      fillOpacity: 1,
+      zIndex: 10,
+      bubble: true,
+      cursor: 'pointer',
+      clickable: true,
+      extData: {
+        id: options.id,
+        name: options.name,
+        position: options.position
+      }
+    });
+    // 以 icon URL 的形式创建一个途经点
+    /*const enterpriseMarker = new AMap.Marker({
+      map: this.Map,
+      position: options.position,
+      icon: 'assets/images/' + icon,
+      offset: new AMap.Pixel(-17, -39),
+      extData: {
+        id: options.id,
+        name: options.name,
+        position: options.position
+      }
+    });*/
+    this.areaMarks.push(enterpriseMarker);
+  }
+  clearMark() {
+    this.Map.remove(this.areaMarks);
+  }
+  createMainPointsMark () {
+    if (this.mainPointsMark) {
+      this.mainPointsMark.forEach(item => {
+        item.show();
+      });
+      return;
+    }
+    this.mainPointsMark = [];
+    const mainPointData = [
+      {name: '欧洲中心',position: [104.071103,30.536455]},
+      {name: '菁蓉汇',position: [104.062619,30.539169]},
+      {name: '孵化园',position: [104.066115,30.575503]},
+      {name: '高新管委会',position: [104.065548,30.592033]},
+      {name: '新川科技园',position: [104.081812,30.514978]},
+      {name: '起步园',position: [104.02935,30.6121]},
+      {name: '电子科技大学',position: [104.100227,30.675702]},
+      {name: '西区孵化园',position: [103.972009,30.734946]},
+      {name: '软件园A区',position: [104.070592,30.549197]},
+      {name: '软件园B区',position: [104.070744,30.544608]},
+      {name: '软件园C区',position: [104.071574,30.539826]},
+      {name: '软件园D区',position: [104.07461,30.539879]},
+      {name: '软件园E区',position: [104.068359,30.538196]},
+      {name: '软件园F区',position: [104.062624,30.539245]},
+      {name: '软件园G区',position: [104.055384,30.538718]}
+    ];
+    mainPointData.forEach(item => {
+      var marker = new AMap.Marker({
+        map: this.Map,
+        position: item.position,
+        icon: 'assets/images/building-point.png',
+        offset: new AMap.Pixel(-16, 0),
+        zooms: [13, 18],
+        cursor: 'grab',
+        label: {
+          content: `<div class="main-point-con">${item.name}</div>`,
+          offset: new AMap.Pixel(30, 8)
+        }
+      });
+      this.mainPointsMark.push(marker);
+    });
   }
 }

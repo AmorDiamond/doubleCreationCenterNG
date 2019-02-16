@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "doubleCreationCenter": {
+    "dicenterClientProject": {
       "root": "",
       "sourceRoot": "src",
       "projectType": "application",
@@ -13,7 +13,7 @@
         "build": {
           "builder": "@angular-devkit/build-angular:browser",
           "options": {
-            "outputPath": "dist/doubleCreationCenter",
+            "outputPath": "dist/dicenterClientProject",
             "index": "src/index.html",
             "main": "src/main.ts",
             "polyfills": "src/polyfills.ts",
@@ -23,10 +23,14 @@
               "src/assets"
             ],
             "styles": [
-              "src/styles.css",
-              "src/assets/css/normalize.css"
+              "src/assets/css/normalize.css",
+              "src/assets/css/jquery.mCustomScrollbar.min.css",
+              "src/styles.css"
             ],
-            "scripts": []
+            "scripts": [
+              "src/assets/js/jquery.min.js",
+              "src/assets/js/jquery.mCustomScrollbar.concat.min.js"
+            ]
           },
           "configurations": {
             "production": {
@@ -51,18 +55,18 @@
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
           "options": {
-            "browserTarget": "doubleCreationCenter:build"
+            "browserTarget": "dicenterClientProject:build"
           },
           "configurations": {
             "production": {
-              "browserTarget": "doubleCreationCenter:build:production"
+              "browserTarget": "dicenterClientProject:build:production"
             }
           }
         },
         "extract-i18n": {
           "builder": "@angular-devkit/build-angular:extract-i18n",
           "options": {
-            "browserTarget": "doubleCreationCenter:build"
+            "browserTarget": "dicenterClientProject:build"
           }
         },
         "test": {
@@ -96,7 +100,7 @@
         }
       }
     },
-    "doubleCreationCenter-e2e": {
+    "dicenterClientProject-e2e": {
       "root": "e2e/",
       "projectType": "application",
       "architect": {
@@ -104,11 +108,11 @@
           "builder": "@angular-devkit/build-angular:protractor",
           "options": {
             "protractorConfig": "e2e/protractor.conf.js",
-            "devServerTarget": "doubleCreationCenter:serve"
+            "devServerTarget": "dicenterClientProject:serve"
           },
           "configurations": {
             "production": {
-              "devServerTarget": "doubleCreationCenter:serve:production"
+              "devServerTarget": "dicenterClientProject:serve:production"
             }
           }
         },
@@ -124,5 +128,5 @@
       }
     }
   },
-  "defaultProject": "doubleCreationCenter"
+  "defaultProject": "dicenterClientProject"
 }
